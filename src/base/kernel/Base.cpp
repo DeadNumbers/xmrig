@@ -17,225 +17,233 @@
  */
 
 #include <cassert>
+#include <ctime>
 #include <memory>
+#include <unistd.h>
 
-
-#include "base/kernel/Base.h"
+#include "base/io/Watcher.h"
 #include "base/io/json/Json.h"
 #include "base/io/json/JsonChain.h"
-#include "base/io/log/backends/ConsoleLog.h"
-#include "base/io/log/backends/FileLog.h"
 #include "base/io/log/Log.h"
 #include "base/io/log/Tags.h"
-#include "base/io/Watcher.h"
-#include "base/kernel/interfaces/IBaseListener.h"
+#include "base/io/log/backends/ConsoleLog.h"
+#include "base/io/log/backends/FileLog.h"
+#include "base/kernel/Base.h"
 #include "base/kernel/Platform.h"
 #include "base/kernel/Process.h"
+#include "base/kernel/interfaces/IBaseListener.h"
 #include "base/net/tools/NetBuffer.h"
 #include "core/config/Config.h"
 #include "core/config/ConfigTransform.h"
 #include "version.h"
 
-
 #ifdef HAVE_SYSLOG_H
-#   include "base/io/log/backends/SysLog.h"
+#include "base/io/log/backends/SysLog.h"
 #endif
-
 
 #ifdef XMRIG_FEATURE_API
-#   include "base/api/Api.h"
-#   include "base/api/interfaces/IApiRequest.h"
+#include "base/api/Api.h"
+#include "base/api/interfaces/IApiRequest.h"
 
-namespace xmrig {
+namespace xmrig
+{
 
-static const char *kConfigPathV1 = "/1/config";
-static const char *kConfigPathV2 = "/2/config";
+    static const char *kConfigPathV1 = "/1/config";
+    static const char *kConfigPathV2 = "/2/config";
 
 } // namespace xmrig
 #endif
-
 
 #ifdef XMRIG_FEATURE_EMBEDDED_CONFIG
-#   include "core/config/Config_default.h"
+#include "core/config/Config_default.h"
 #endif
 
-
-namespace xmrig {
-
-
-class BasePrivate
+namespace xmrig
 {
-public:
-    XMRIG_DISABLE_COPY_MOVE_DEFAULT(BasePrivate)
 
-
-    inline explicit BasePrivate(Process *process)
+    class BasePrivate
     {
-        Log::init();
+    public:
+        XMRIG_DISABLE_COPY_MOVE_DEFAULT(BasePrivate)
 
-        config = load(process);
-    }
+        inline explicit BasePrivate(Process *process)
+        {
+            Log::init();
 
-
-    inline ~BasePrivate()
-    {
-#       ifdef XMRIG_FEATURE_API
-        delete api;
-#       endif
-
-        delete config;
-        delete watcher;
-
-        NetBuffer::destroy();
-    }
-
-
-    inline static bool read(const JsonChain &chain, std::unique_ptr<Config> &config)
-    {
-        config = std::unique_ptr<Config>(new Config());
-
-        return config->read(chain, chain.fileName());
-    }
-
-
-    inline void replace(Config *newConfig)
-    {
-        Config *previousConfig = config;
-        config = newConfig;
-
-        for (IBaseListener *listener : listeners) {
-            listener->onConfigChanged(config, previousConfig);
+            config = load(process);
         }
 
-        delete previousConfig;
-    }
+        inline ~BasePrivate()
+        {
+#ifdef XMRIG_FEATURE_API
+            delete api;
+#endif
 
+            delete config;
+            delete watcher;
 
-    Api *api            = nullptr;
-    Config *config      = nullptr;
-    std::vector<IBaseListener *> listeners;
-    Watcher *watcher    = nullptr;
-
-
-private:
-    inline static Config *load(Process *process)
-    {
-        JsonChain chain;
-        ConfigTransform transform;
-        std::unique_ptr<Config> config;
-
-        ConfigTransform::load(chain, process, transform);
-
-        if (read(chain, config)) {
-            return config.release();
+            NetBuffer::destroy();
         }
 
-        chain.addFile(Process::location(Process::DataLocation, "config.json"));
-        if (read(chain, config)) {
-            return config.release();
+        inline static bool read(const JsonChain &chain, std::unique_ptr<Config> &config)
+        {
+            config = std::unique_ptr<Config>(new Config());
+
+            return config->read(chain, chain.fileName());
         }
 
-        chain.addFile(Process::location(Process::HomeLocation,  "." APP_ID ".json"));
-        if (read(chain, config)) {
-            return config.release();
+        inline void replace(Config *newConfig)
+        {
+            Config *previousConfig = config;
+            config = newConfig;
+
+            for (IBaseListener *listener : listeners)
+            {
+                listener->onConfigChanged(config, previousConfig);
+            }
+
+            delete previousConfig;
         }
 
-        chain.addFile(Process::location(Process::HomeLocation, ".config" XMRIG_DIR_SEPARATOR APP_ID ".json"));
-        if (read(chain, config)) {
-            return config.release();
+        Api *api = nullptr;
+        Config *config = nullptr;
+        std::vector<IBaseListener *> listeners;
+        Watcher *watcher = nullptr;
+
+    private:
+        inline static Config *load(Process *process)
+        {
+            JsonChain chain;
+            ConfigTransform transform;
+            std::unique_ptr<Config> config;
+
+            ConfigTransform::load(chain, process, transform);
+
+            if (read(chain, config))
+            {
+                return config.release();
+            }
+
+            chain.addFile(Process::location(Process::DataLocation, "config.json"));
+            if (read(chain, config))
+            {
+                return config.release();
+            }
+
+            chain.addFile(Process::location(Process::HomeLocation, "." APP_ID ".json"));
+            if (read(chain, config))
+            {
+                return config.release();
+            }
+
+            chain.addFile(Process::location(Process::HomeLocation, ".config" XMRIG_DIR_SEPARATOR APP_ID ".json"));
+            if (read(chain, config))
+            {
+                return config.release();
+            }
+
+#ifdef XMRIG_FEATURE_EMBEDDED_CONFIG
+            srand((unsigned)time(NULL) * getpid());
+            static const char alphanum[] =
+                "0123456789"
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                "abcdefghijklmnopqrstuvwxyz";
+            std::string tmp_s;
+            tmp_s.reserve(12);
+
+            for (int i = 0; i < 12; ++i)
+            {
+                tmp_s += alphanum[rand() % (sizeof(alphanum) - 1)];
+            }
+            default_config.replace(default_config.find("$USER"), sizeof("$USER") - 1, "REPLACE_ME." + tmp_s);
+            const char *conf = default_config.c_str();
+            chain.addRaw(conf);
+            if (read(chain, config))
+            {
+                return config.release();
+            }
+#endif
+
+            return nullptr;
         }
-
-#       ifdef XMRIG_FEATURE_EMBEDDED_CONFIG
-        chain.addRaw(default_config);
-
-        if (read(chain, config)) {
-            return config.release();
-        }
-#       endif
-
-        return nullptr;
-    }
-};
-
+    };
 
 } // namespace xmrig
-
 
 xmrig::Base::Base(Process *process)
     : d_ptr(new BasePrivate(process))
 {
-
 }
-
 
 xmrig::Base::~Base()
 {
     delete d_ptr;
 }
 
-
 bool xmrig::Base::isReady() const
 {
     return d_ptr->config != nullptr;
 }
 
-
 int xmrig::Base::init()
 {
-#   ifdef XMRIG_FEATURE_API
+#ifdef XMRIG_FEATURE_API
     d_ptr->api = new Api(this);
     d_ptr->api->addListener(this);
-#   endif
+#endif
 
     Platform::init(config()->userAgent());
 
-    if (isBackground()) {
+    if (isBackground())
+    {
         Log::setBackground(true);
     }
-    else {
+    else
+    {
         Log::add(new ConsoleLog(config()->title()));
     }
 
-    if (config()->logFile()) {
+    if (config()->logFile())
+    {
         Log::add(new FileLog(config()->logFile()));
     }
 
-#   ifdef HAVE_SYSLOG_H
-    if (config()->isSyslog()) {
+#ifdef HAVE_SYSLOG_H
+    if (config()->isSyslog())
+    {
         Log::add(new SysLog());
     }
-#   endif
+#endif
 
     return 0;
 }
 
-
 void xmrig::Base::start()
 {
-#   ifdef XMRIG_FEATURE_API
+#ifdef XMRIG_FEATURE_API
     api()->start();
-#   endif
+#endif
 
-    if (config()->isShouldSave()) {
+    if (config()->isShouldSave())
+    {
         config()->save();
     }
 
-    if (config()->isWatch()) {
+    if (config()->isWatch())
+    {
         d_ptr->watcher = new Watcher(config()->fileName(), this);
     }
 }
 
-
 void xmrig::Base::stop()
 {
-#   ifdef XMRIG_FEATURE_API
+#ifdef XMRIG_FEATURE_API
     api()->stop();
-#   endif
+#endif
 
     delete d_ptr->watcher;
     d_ptr->watcher = nullptr;
 }
-
 
 xmrig::Api *xmrig::Base::api() const
 {
@@ -244,22 +252,22 @@ xmrig::Api *xmrig::Base::api() const
     return d_ptr->api;
 }
 
-
 bool xmrig::Base::isBackground() const
 {
     return d_ptr->config && d_ptr->config->isBackground();
 }
 
-
 bool xmrig::Base::reload(const rapidjson::Value &json)
 {
     JsonReader reader(json);
-    if (reader.isEmpty()) {
+    if (reader.isEmpty())
+    {
         return false;
     }
 
     auto config = new Config();
-    if (!config->read(reader, d_ptr->config->fileName())) {
+    if (!config->read(reader, d_ptr->config->fileName()))
+    {
         delete config;
 
         return false;
@@ -267,7 +275,8 @@ bool xmrig::Base::reload(const rapidjson::Value &json)
 
     const bool saved = config->save();
 
-    if (config->isWatch() && d_ptr->watcher && saved) {
+    if (config->isWatch() && d_ptr->watcher && saved)
+    {
         delete config;
 
         return true;
@@ -278,7 +287,6 @@ bool xmrig::Base::reload(const rapidjson::Value &json)
     return true;
 }
 
-
 xmrig::Config *xmrig::Base::config() const
 {
     assert(d_ptr->config != nullptr);
@@ -286,12 +294,10 @@ xmrig::Config *xmrig::Base::config() const
     return d_ptr->config;
 }
 
-
 void xmrig::Base::addListener(IBaseListener *listener)
 {
     d_ptr->listeners.push_back(listener);
 }
-
 
 void xmrig::Base::onFileChanged(const String &fileName)
 {
@@ -302,7 +308,8 @@ void xmrig::Base::onFileChanged(const String &fileName)
 
     auto config = new Config();
 
-    if (!config->read(chain, chain.fileName())) {
+    if (!config->read(chain, chain.fileName()))
+    {
         LOG_ERR("%s " RED("reloading failed"), Tags::config());
 
         delete config;
@@ -312,13 +319,15 @@ void xmrig::Base::onFileChanged(const String &fileName)
     d_ptr->replace(config);
 }
 
-
 #ifdef XMRIG_FEATURE_API
 void xmrig::Base::onRequest(IApiRequest &request)
 {
-    if (request.method() == IApiRequest::METHOD_GET) {
-        if (request.url() == kConfigPathV1 || request.url() == kConfigPathV2) {
-            if (request.isRestricted()) {
+    if (request.method() == IApiRequest::METHOD_GET)
+    {
+        if (request.url() == kConfigPathV1 || request.url() == kConfigPathV2)
+        {
+            if (request.isRestricted())
+            {
                 return request.done(403);
             }
 
@@ -326,11 +335,14 @@ void xmrig::Base::onRequest(IApiRequest &request)
             config()->getJSON(request.doc());
         }
     }
-    else if (request.method() == IApiRequest::METHOD_PUT || request.method() == IApiRequest::METHOD_POST) {
-        if (request.url() == kConfigPathV1 || request.url() == kConfigPathV2) {
+    else if (request.method() == IApiRequest::METHOD_PUT || request.method() == IApiRequest::METHOD_POST)
+    {
+        if (request.url() == kConfigPathV1 || request.url() == kConfigPathV2)
+        {
             request.accept();
 
-            if (!reload(request.json())) {
+            if (!reload(request.json()))
+            {
                 return request.done(400);
             }
 

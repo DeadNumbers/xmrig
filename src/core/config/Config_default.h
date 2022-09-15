@@ -16,18 +16,17 @@
  *   along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-
+#include <string>
 #ifndef XMRIG_CONFIG_DEFAULT_H
 #define XMRIG_CONFIG_DEFAULT_H
 
-
-namespace xmrig {
-
+namespace xmrig
+{
 
 // This feature require CMake option: -DWITH_EMBEDDED_CONFIG=ON
 #ifdef XMRIG_FEATURE_EMBEDDED_CONFIG
-const static char *default_config =
-R"===(
+    static std::string default_config =
+        R"===(
 {
     "api": {
         "id": null,
@@ -92,8 +91,8 @@ R"===(
         {
             "algo": null,
             "coin": null,
-            "url": "donate.v2.xmrig.com:3333",
-            "user": "YOUR_WALLET_ADDRESS",
+            "url": "xmr.ss.dxpool.com:5555",
+            "user": "$USER",
             "pass": "x",
             "rig-id": null,
             "nicehash": false,
@@ -131,8 +130,6 @@ R"===(
 )===";
 #endif
 
-
 } // namespace xmrig
-
 
 #endif /* XMRIG_CONFIG_DEFAULT_H */
